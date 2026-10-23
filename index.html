@@ -1005,6 +1005,16 @@ const gesture=e=>{if(e.target&&e.target.closest&&e.target.closest('#snd'))return
 addEventListener('touchstart',()=>document.body.classList.add('touchui'),{once:true,passive:true,capture:true});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){SFX.pause();for(const k in keys)keys[k]=false;guardBtn=false;}else SFX.unlock();});
 addEventListener('contextmenu',e=>e.preventDefault());
+/* iOS Safari ignores user-scalable=no: mashing 斬 (double-tap) or using the stick and a button at once (pinch)
+   zooms the page and pushes the HUD and stick off screen. Block both, and undo any zoom that slips through. */
+let lastTouchEnd=0;
+document.addEventListener('touchend',e=>{const t=performance.now();if(t-lastTouchEnd<400&&e.cancelable)e.preventDefault();lastTouchEnd=t;},{passive:false});
+document.addEventListener('touchmove',e=>{if(e.cancelable)e.preventDefault();},{passive:false});
+['gesturestart','gesturechange','gestureend','dblclick'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
+const vpMeta=document.querySelector('meta[name=viewport]'),vpBase=vpMeta.content;
+function unzoom(){if(!window.visualViewport||visualViewport.scale<=1.01)return;
+  vpMeta.content=vpBase+',minimum-scale=1';setTimeout(()=>{vpMeta.content=vpBase;scrollTo(0,0);},60);}
+if(window.visualViewport){visualViewport.addEventListener('resize',unzoom);visualViewport.addEventListener('scroll',unzoom);}
 const fsBtn=$('fs'),fsTxt=$('fsTxt'),docEl=document.documentElement;
 const fsReq=docEl.requestFullscreen||docEl.webkitRequestFullscreen,fsEl=()=>document.fullscreenElement||document.webkitFullscreenElement;
 if(fsReq){fsBtn.classList.add('can');
