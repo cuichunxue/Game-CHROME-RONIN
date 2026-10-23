@@ -1287,7 +1287,10 @@ function updateCamera(dtR){
   const tYaw=pl.yaw+side+(auto?.55*Math.sin(now*.11):0);
   cam.yaw+=angDiff(cam.yaw,tYaw)*(1-Math.exp(-dtR*(rate+(side?1.2:0))));
   const kt=mv==='karatake',sl=mv==='slide',close=kt||pl.state==='parry';
-  const dist=(close?5.2:sl?6.2:7.2)*camK,h=(close?2.1:sl?2.6:3.2)*(.35+.65*camK);
+  /* on small screens ease back during combos so the lunge and the target both stay in frame */
+  const ck=camK<1&&(pl.state==='atk'||combo>=2)?Math.min(1,camK+.12):camK;
+  const cl=camK<1?.45:1; /* weaker dramatic push-in on small screens: the karatake leap would leave the frame */
+  const dist=(close?7.2-2*cl:sl?6.2:7.2)*ck,h=(close?3.2-1.1*cl:sl?2.6:3.2)*(.35+.65*ck);
   const want=new V(pp.x-Math.sin(cam.yaw)*dist,h,pp.z-Math.cos(cam.yaw)*dist);
   camera.position.lerp(want,1-Math.exp(-dtR*5));
   const f=fwdOf(pl.yaw),lk=new V(pp.x+f.x*1.2,1.05+pp.y*.5+pl.P.bodyY*.4,pp.z+f.z*1.2);
@@ -1296,7 +1299,7 @@ function updateCamera(dtR){
   const sh=RM?0:trauma*trauma*.45;
   camera.position.x+=rand(-1,1)*sh;camera.position.y+=rand(-1,1)*sh;
   camera.lookAt(cam.look);
-  const tf=sl?66:close?50:55;cam.fov+=(tf-cam.fov)*(1-Math.exp(-dtR*6));
+  const tf=sl?66:close?55-5*cl:55;cam.fov+=(tf-cam.fov)*(1-Math.exp(-dtR*6));
   camera.fov=fovK===1?cam.fov:2*Math.atan(Math.tan(cam.fov*Math.PI/360)*fovK)*180/Math.PI;camera.updateProjectionMatrix();
 }
 
@@ -1305,7 +1308,7 @@ function updateCamera(dtR){
 let fovK=1,camK=1;
 function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;
   fovK=camera.aspect<1?Math.pow(Math.min(1.4,1/camera.aspect),.5):1;
-  camK=camera.aspect<1?.86:(COARSE||h<500)?.8:1;camera.updateProjectionMatrix();}
+  camK=camera.aspect<1?.97:(COARSE||h<500)?.9:1;camera.updateProjectionMatrix();}
 addEventListener('resize',resize);addEventListener('orientationchange',()=>setTimeout(resize,250));
 if(window.visualViewport)visualViewport.addEventListener('resize',resize);resize();
 /* adaptive quality: drop render resolution when frames run long, then shadows as a last resort;
