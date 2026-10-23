@@ -698,6 +698,7 @@ const SFX=(()=>{
     musF=ctx.createBiquadFilter();musF.type='lowpass';musF.frequency.value=16000;musF.connect(out);
     mus=ctx.createGain();mus.gain.value=.3;mus.connect(musF);
     const verb=ctx.createConvolver();verb.buffer=impulse(1.8,3);const vr=ctx.createGain();vr.gain.value=.32;verb.connect(vr);vr.connect(out);verbIn=verb;
+    ctx.onstatechange=()=>{if(api.onstate)api.onstate();};
     noiseBuf=ctx.createBuffer(1,ctx.sampleRate,ctx.sampleRate);const nd=noiseBuf.getChannelData(0);for(let i=0;i<nd.length;i++)nd[i]=Math.random()*2-1;
     return true;}
   function env(t,a,peak,d,dest,rv){const n=ctx.createGain();n.gain.setValueAtTime(.0001,t);n.gain.linearRampToValueAtTime(Math.max(.0002,peak),t+a);n.gain.exponentialRampToValueAtTime(.0001,t+a+d);
@@ -729,12 +730,30 @@ const SFX=(()=>{
   }
   function sched(){if(!ctx||!wanted||ctx.state!=='running')return;if(next<ctx.currentTime)next=ctx.currentTime+.05;
     while(next<ctx.currentTime+.14){playStep(step,next);next+=SD;step++;}}
-  return {
-    unlock(){if(!wanted||document.hidden)return;if(!ctx&&!init())return;if(ctx.state!=='running'&&ctx.resume)ctx.resume().catch(()=>{});
+  /* iOS routes Web Audio through the ringer channel, so the silent switch mutes it.
+     Declaring a playback session (iOS 17+) or keeping a silent <audio> element playing (older iOS) lifts that. */
+  let silentEl=null;
+  function silentWav(){const n=2205,b=new ArrayBuffer(44+n*2),v=new DataView(b),w=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));};
+    w(0,'RIFF');v.setUint32(4,36+n*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+    v.setUint32(24,22050,true);v.setUint32(28,44100,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*2,true);
+    return URL.createObjectURL(new Blob([b],{type:'audio/wav'}));}
+  function mediaChannel(){
+    try{if(navigator.audioSession){navigator.audioSession.type='playback';return;}}catch(_){}
+    if(!/iPad|iPhone|iPod/.test(navigator.userAgent)&&!(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1))return;
+    if(!silentEl){silentEl=new Audio(silentWav());silentEl.loop=true;silentEl.setAttribute('playsinline','');}
+    if(silentEl.paused)silentEl.play().catch(()=>{});}
+  const api={
+    onstate:null,
+    unlock(){if(!wanted||document.hidden)return;if(!ctx&&!init())return;mediaChannel();
+      if(ctx.state!=='running'&&ctx.resume){ctx.resume().catch(()=>{});
+        /* older WebKit only starts the clock once something is played inside the gesture */
+        const s=ctx.createBufferSource();s.buffer=ctx.createBuffer(1,1,22050);s.connect(ctx.destination);s.start(0);}
       if(!started){started=true;next=ctx.currentTime+.1;setInterval(sched,25);}},
-    pause(){if(ctx&&ctx.state==='running'&&ctx.suspend)ctx.suspend().catch(()=>{});},
-    toggle(){if(!ctx){wanted=true;this.unlock();return true;}wanted=!wanted;out.gain.setTargetAtTime(wanted?1:0,ctx.currentTime,.05);return wanted;},
-    get live(){return !!ctx&&wanted;},
+    pause(){if(silentEl)silentEl.pause();if(ctx&&ctx.state==='running'&&ctx.suspend)ctx.suspend().catch(()=>{});},
+    /* a tap on the button while the context is still locked means "turn it on", never "off" */
+    toggle(){if(!ctx||ctx.state!=='running'||!wanted){wanted=true;if(out)out.gain.setTargetAtTime(1,ctx.currentTime,.05);this.unlock();return true;}
+      wanted=false;out.gain.setTargetAtTime(0,ctx.currentTime,.05);if(silentEl)silentEl.pause();return false;},
+    get live(){return !!ctx&&wanted&&ctx.state==='running';},
     update(lv,slowMo){level=lv;if(ctx)musF.frequency.setTargetAtTime(slowMo?650:16000,ctx.currentTime,.06);},
     swing(kind,d){if(!ok())return;const t=ctx.currentTime,v=dv(d);
       if(kind==='heavy')hiss(t,.32,.7*v,'bandpass',260,1600,1.2,{a:.06});
@@ -766,6 +785,7 @@ const SFX=(()=>{
     slide(){if(!ok())return;hiss(ctx.currentTime,.55,.35,'bandpass',900,400,1.2,{a:.02});},
     step(){if(!ok())return;const t=ctx.currentTime;hiss(t,.04,.07,'lowpass',700,300,.7);tone('sine',90,60,t,.05,.07);}
   };
+  return api;
 })();
 
 /* ---------- trail (blade or shin) ---------- */
@@ -978,9 +998,10 @@ modeBtn.addEventListener('click',()=>{auto=!auto;if(!auto)lastInput=now;setModeU
 const sndBtn=$('snd'),sndTxt=$('sndTxt');
 function setSndUI(){const on=SFX.live;sndBtn.classList.toggle('off',!on);sndBtn.setAttribute('aria-pressed',on?'true':'false');sndTxt.textContent=on?'音 オン':'音 オフ';}
 sndBtn.addEventListener('click',e=>{e.stopPropagation();SFX.toggle();setSndUI();});
+SFX.onstate=setSndUI;
 /* every gesture retries the unlock: iOS re-suspends the context after calls, alarms and app switches */
 const gesture=e=>{if(e.target&&e.target.closest&&e.target.closest('#snd'))return;SFX.unlock();setSndUI();};
-['pointerdown','keydown','touchend'].forEach(ev=>addEventListener(ev,gesture,{capture:true,passive:true}));
+['pointerdown','pointerup','keydown','touchend','click'].forEach(ev=>addEventListener(ev,gesture,{capture:true,passive:true}));
 addEventListener('touchstart',()=>document.body.classList.add('touchui'),{once:true,passive:true,capture:true});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){SFX.pause();for(const k in keys)keys[k]=false;guardBtn=false;}else SFX.unlock();});
 addEventListener('contextmenu',e=>e.preventDefault());
